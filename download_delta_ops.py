@@ -6,6 +6,8 @@ Output: data/delta_ops.csv, one row per quarter from Q1 2022 on, with
         - adjusted_revenue_usd: operating revenue excluding third-party refinery sales
         - rpm_millions: revenue passenger miles (how much people flew)
         - asm_millions: available seat miles (how many seats Delta offered)
+        - passenger_mile_yield_cents: passenger revenue per passenger mile (average fare per mile)
+        - fuel_price_per_gallon_usd: average price Delta paid per gallon of fuel
         - filed_date: the day the release was filed, i.e. when the numbers became public
 
 Each quarter's figures are taken from the release that first announced them.
@@ -43,6 +45,18 @@ REVENUE_ROWS = {
     "refinery": re.compile(r"third-party refinery sales", re.I),
     "adjusted": re.compile(r"(total )?operating revenue, adjusted", re.I),
 }
+# Rows to read from the statistical summary table, keyed by output column.
+STAT_ROWS = {
+    "rpm_millions": re.compile(r"Revenue passenger miles \(millions\)"),
+    "asm_millions": re.compile(r"Available seat miles \(millions\)"),
+    "passenger_mile_yield_cents": re.compile(r"Passenger mile yield \(cents\)"),
+    # Not the "adjusted" row beneath it, which strips out fuel hedging effects.
+    "fuel_price_per_gallon_usd": re.compile(r"Average price per fuel gallon"),
+}
+# How far a figure may differ between two releases. Delta rounds each dollar figure
+# to the nearest $1M separately, so those can be off by one. Everything else must
+# match exactly as printed.
+TOLERANCE = {"gaap": 1, "refinery": 1, "adjusted": 1}
 # Cells that hold only table decoration, not data.
 DECORATION = {"", "$", ")", "%", ")%", ") %"}
 
@@ -106,7 +120,7 @@ def quarter_ending(month: str, day: str, year: str) -> pd.Period:
 
 
 def parse_operating_stats(tables: list) -> dict:
-    """Return {quarter: {rpm_millions, asm_millions}} from the statistical summary table."""
+    """Return {quarter: {one value per STAT_ROWS column}} from the statistical summary table."""
     matches = [t for t in tables if any(r[0].startswith("Revenue passenger miles") for r in t)]
     if len(matches) != 1:
         raise ValueError(f"Expected one operating statistics table, found {len(matches)}.")
@@ -119,10 +133,14 @@ def parse_operating_stats(tables: list) -> dict:
     # The quarter's two columns come first; year-to-date columns, when present, follow.
     years = re.findall(r"\b(20\d\d)\b", header_text)[:2]
 
-    rpm = numbers_in(next(r for r in table if r[0].startswith("Revenue passenger miles")))
-    asm = numbers_in(next(r for r in table if r[0].startswith("Available seat miles")))
+    found = {}
+    for name, pattern in STAT_ROWS.items():
+        rows = [row for row in table if pattern.fullmatch(row[0])]
+        if len(rows) != 1:
+            raise ValueError(f"Expected one '{pattern.pattern}' row, found {len(rows)}.")
+        found[name] = numbers_in(rows[0])
     return {
-        quarter_ending(month, day, year): {"rpm_millions": rpm[i], "asm_millions": asm[i]}
+        quarter_ending(month, day, year): {name: values[i] for name, values in found.items()}
         for i, year in enumerate(years)
     }
 
@@ -174,6 +192,8 @@ def main() -> None:
                 "adjusted_revenue_usd": int(revenue[announced]["adjusted"] * 1_000_000),
                 "rpm_millions": int(stats[announced]["rpm_millions"]),
                 "asm_millions": int(stats[announced]["asm_millions"]),
+                "passenger_mile_yield_cents": stats[announced]["passenger_mile_yield_cents"],
+                "fuel_price_per_gallon_usd": stats[announced]["fuel_price_per_gallon_usd"],
                 "filed_date": filing.filingDate,
             }
         )
@@ -193,10 +213,12 @@ def main() -> None:
     if list(ops["quarter"]) != list(expected):
         problems.append(f"Quarters are not consecutive: {list(ops['quarter'].astype(str))}")
 
-    # Delta rounds each figure to the nearest $1M separately, so allow a $1M difference.
     spread = readings.groupby(["quarter", "metric"])["value"].agg(["min", "max", "count"])
-    for (quarter, metric), r in spread[spread["max"] - spread["min"] > 1].iterrows():
-        problems.append(f"{quarter} {metric} differs between releases: {r['min']:,.0f} vs {r['max']:,.0f}")
+    allowed = spread.index.get_level_values("metric").map(lambda metric: TOLERANCE.get(metric, 0))
+    # The tiny extra margin absorbs floating-point noise in the subtraction, nothing more.
+    differs = (spread["max"] - spread["min"]).to_numpy() > allowed.to_numpy() + 1e-9
+    for (quarter, metric), r in spread[differs].iterrows():
+        problems.append(f"{quarter} {metric} differs between releases: {r['min']:,.2f} vs {r['max']:,.2f}")
 
     first = readings.sort_values("filed").drop_duplicates(["quarter", "metric"]).pivot(
         index="quarter", columns="metric", values="value"
