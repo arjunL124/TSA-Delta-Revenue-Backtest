@@ -221,3 +221,6 @@ __marimo__/
 
 # macOS Finder metadata
 .DS_Store
+
+# Private study notes, kept off GitHub
+STUDY_GUIDE.md
