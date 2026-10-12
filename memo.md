@@ -1,6 +1,6 @@
 # Can an investor use TSA data to track Delta's revenue?
 
-October 2026
+**Arjun Lakhanpal** | October 2026
 
 ## Short answer
 
