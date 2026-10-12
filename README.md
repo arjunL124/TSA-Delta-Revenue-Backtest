@@ -24,7 +24,9 @@ The short write-up is in [memo.md](memo.md). The full analysis, with every step 
 | `delta_quarterly_revenue.csv` | GAAP revenue | [SEC EDGAR company facts](https://www.sec.gov/edgar/sec-api-documentation) | `download_delta_revenue.py` |
 | `airfare_cpi_monthly.csv`, `airfare_cpi_quarterly.csv` | Consumer Price Index for airline fares | [Bureau of Labor Statistics](https://data.bls.gov/timeseries/CUUR0000SETG01), series CUUR0000SETG01 | `download_airfare_cpi.py` |
 
-Each script checks its own output and stops with an error if a day or quarter is missing, or if a figure disagrees between two Delta releases.
+## Validation
+
+Each script checks its own output and stops with an error if a day or quarter is missing. Delta's figures are compared across releases wherever a later release repeats them (108 of 133 figures so far), and the GAAP revenue in every release is matched against the SEC's data. Each year's four quarters were also confirmed to add up to Delta's printed annual totals for 2022 to 2025. I manually checked Q2 2023 and Q2 2026 against Delta's press releases, and all the figures matched.
 
 ## How to rerun
 
